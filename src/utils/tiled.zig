@@ -639,6 +639,8 @@ fn loadTilesets(
 
         // Load attributes
         var tileset = e1;
+        // The directory that this tileset exists in
+        var tileset_dir: []const u8 = "";
         PARSE_TILESET: while (true) {
             for (tileset.attributes) |a| {
                 if (std.mem.eql(u8, a.name, "firstgid")) {
@@ -647,6 +649,12 @@ fn loadTilesets(
                     continue;
                 }
                 if (std.mem.eql(u8, a.name, "source")) {
+                    // Store the directory that the current tileset is operating in
+                    tileset_dir = if (std.mem.lastIndexOfScalar(u8, a.value, '/')) |idx|
+                        a.value[0..idx]
+                    else
+                        "";
+
                     const tsx_content = try getExternalFileContent(
                         temp_allocator,
                         use_physfs,
@@ -710,10 +718,15 @@ fn loadTilesets(
             if (img.findChildByTag("data") != null) return error.UnsupportedImageData;
             for (img.attributes) |a| {
                 if (std.mem.eql(u8, a.name, "source")) {
+                    // Fetch the source relative to our tilemap by joining
+                    const sep = if (use_physfs) "/" else std.fs.path.sep_str;
+                    const full_dirname = try std.mem.joinZ(temp_allocator, sep, &.{ dirname, tileset_dir });
+                    defer temp_allocator.free(full_dirname);
+
                     const image_content = try getExternalFileContent(
                         temp_allocator,
                         use_physfs,
-                        dirname,
+                        full_dirname,
                         a.value,
                     );
                     defer temp_allocator.free(image_content);
