@@ -639,6 +639,10 @@ fn loadTilesets(
 
         // Load attributes
         var tileset = e1;
+
+        // The directory that this tileset exists in
+        var tileset_dir: []const u8 = "";
+
         PARSE_TILESET: while (true) {
             for (tileset.attributes) |a| {
                 if (std.mem.eql(u8, a.name, "firstgid")) {
@@ -647,12 +651,17 @@ fn loadTilesets(
                     continue;
                 }
                 if (std.mem.eql(u8, a.name, "source")) {
-                    const tsx_content = try getExternalFileContent(
-                        temp_allocator,
-                        use_physfs,
-                        dirname,
-                        a.value,
-                    );
+                    // If the tileset is in a different directory, slice it and save it
+                    tileset_dir = if (std.mem.lastIndexOfScalar(u8, a.value, '/')) |idx|
+                        a.value[0..idx]
+                    else
+                        "";
+
+                    // Resolve our directory & source into a path.
+                    const full_path = try std.fs.path.resolvePosix(temp_allocator, &.{ dirname, a.value });
+                    defer temp_allocator.free(full_path);
+
+                    const tsx_content = try getExternalFileContent(temp_allocator, use_physfs, full_path);
                     defer temp_allocator.free(tsx_content);
 
                     external_doc = try xml.parse(temp_allocator, tsx_content);
@@ -710,13 +719,13 @@ fn loadTilesets(
             if (img.findChildByTag("data") != null) return error.UnsupportedImageData;
             for (img.attributes) |a| {
                 if (std.mem.eql(u8, a.name, "source")) {
-                    const image_content = try getExternalFileContent(
-                        temp_allocator,
-                        use_physfs,
-                        dirname,
-                        a.value,
-                    );
+                    // Fetch the source relative to our tilemap by joining the current directory with our tileset directory
+                    const full_path = try std.fs.path.resolvePosix(temp_allocator, &.{ dirname, tileset_dir, a.value });
+                    defer temp_allocator.free(full_path);
+
+                    const image_content = try getExternalFileContent(temp_allocator, use_physfs, full_path);
                     defer temp_allocator.free(image_content);
+
                     ts[tsidx].texture = try rd.createTextureFromFileData(image_content, .static, false);
                     break;
                 }
@@ -982,7 +991,7 @@ fn loadLayers(
                         .gids = &.{},
                     });
                     var gids = try std.ArrayList(GlobalTileID).initCapacity(arena_allocator, 20);
-                    var gid_it = std.mem.splitAny(u8, data.children[0].char_data, ",\n");
+                    var gid_it = std.mem.splitAny(u8, data.children[0].char_data, ",\r\n");
                     while (gid_it.next()) |s| {
                         if (s.len == 0) continue;
                         try gids.append(.{ ._id = try std.fmt.parseInt(u32, s, 10) });
@@ -1200,21 +1209,15 @@ inline fn initPropertyTree(element: *const xml.Element, allocator: std.mem.Alloc
     }
 }
 
-inline fn getExternalFileContent(
-    allocator: std.mem.Allocator,
-    use_physfs: bool,
-    dirname: []const u8,
-    filename: []const u8,
-) ![]const u8 {
-    const sep = if (use_physfs) "/" else std.fs.path.sep_str;
-    const path = try std.fmt.allocPrintZ(allocator, "{s}{s}{s}", .{ dirname, sep, filename });
-    defer allocator.free(path);
+inline fn getExternalFileContent(allocator: std.mem.Allocator, use_physfs: bool, path: []const u8) ![]const u8 {
+    const zpath = try std.fmt.allocPrintZ(allocator, "{s}", .{path});
+    defer allocator.free(zpath);
     if (use_physfs) {
-        const handle = try physfs.open(path, .read);
+        const handle = try physfs.open(zpath, .read);
         defer handle.close();
         return try handle.readAllAlloc(allocator);
     } else {
-        const file = try std.fs.cwd().openFileZ(path, .{ .mode = .read_only });
+        const file = try std.fs.cwd().openFileZ(zpath, .{ .mode = .read_only });
         defer file.close();
         return file.readToEndAlloc(allocator, 1 << 30);
     }
