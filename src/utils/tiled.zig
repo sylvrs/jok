@@ -418,9 +418,9 @@ pub const Layer = union(enum) {
 
     pub fn getProperty(self: Layer, name: []const u8) ?PropertyValue {
         return switch (self) {
-            .tile_layer => |l| try l.props.get(name),
-            .object_layer => |l| try l.props.get(name),
-            .image_layer => |l| try l.props.get(name),
+            .tile_layer => |l| l.props.get(name),
+            .object_layer => |l| l.props.get(name),
+            .image_layer => |l| l.props.get(name),
         };
     }
 };
